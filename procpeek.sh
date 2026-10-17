@@ -21,13 +21,22 @@ pkg_of() {   # which package owns a file (rpm on AlmaLinux/CentOS, dpkg on Debia
   local f p
   [ -n "$1" ] && [ -e "$1" ] || return 1
   for f in "$1" "$(readlink -f "$1")"; do       # 2nd try handles /bin -> /usr/bin symlinks
-    if command -v rpm >/dev/null 2>&1 && p=$(rpm -qf "$f" 2>/dev/null); then echo "$p"; return 0; fi
+    # some files belong to several packages: keep the first so table rows stay on one line
+    if command -v rpm >/dev/null 2>&1 && p=$(rpm -qf "$f" 2>/dev/null); then echo "${p%%$'\n'*}"; return 0; fi
     if command -v dpkg >/dev/null 2>&1; then
       p=$(dpkg -S "$f" 2>/dev/null | head -1 | cut -d: -f1)
       [ -n "$p" ] && { echo "$p"; return 0; }
     fi
   done
   return 1
+}
+
+container_of() {  # "name (id)" if the process runs inside a Docker/Podman/containerd container
+  local id name
+  id=$(grep -oE '(docker|libpod|cri-containerd)[-/:][0-9a-f]{12}' "/proc/$1/cgroup" 2>/dev/null | head -1 | grep -oE '[0-9a-f]{12}$')
+  [ -n "$id" ] || return 1
+  command -v docker >/dev/null 2>&1 && name=$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null) && name=${name#/}
+  echo "${name:+$name }($id)"
 }
 
 orig_path() {  # "/usr/bin/perl;6abda560 (deleted)" -> "/usr/bin/perl"
@@ -86,7 +95,8 @@ ports() {
       127.*|\[::1\]*|::1*|*%lo:*) scope=local;  col=$D ;;
       *)                          scope=PUBLIC; col=$Y ;;
     esac
-    pkg=$( [ -n "$pid" ] && pkg_of "$(orig_path "$(exe_of "$pid")")" || echo "-")
+    pkg=$( [ -n "$pid" ] && pkg_of "$(orig_path "$(exe_of "$pid")")" ) ||
+      pkg=$( [ -n "$pid" ] && c=$(container_of "$pid") && echo "container: $c" || echo "-")
     printf "%-5s %-28s ${col}%-7s${N} %-7s %-14s ${D}%s${N}\n" \
       "$proto" "$local" "$scope" "${pid:--}" "${name:--}" "$pkg"
   done
@@ -95,7 +105,7 @@ ports() {
 
 # ---------- profile ----------
 profile() {
-  local p=$1 s exe cmd cwd script a chain q n fds memfds svc v lvl why kids
+  local p=$1 s exe cmd cwd script a chain q n fds memfds svc v lvl why kids cont
   [ -d "/proc/$p" ] || { echo "${R}No such PID: $p${N}"; exit 1; }
   s=/proc/$p/status
   exe=$(exe_of "$p")
@@ -109,10 +119,17 @@ profile() {
   row Memory  "$(awk '/^VmRSS:/{printf "%.1f MB", $2/1024}' "$s")"
   row Command "${cmd:-[kernel thread]}"
   row Binary  "${exe:-none}"
-  row Package "$(pkg_of "$(orig_path "$exe")" || echo 'not from a package')"
+  cont=$(container_of "$p")
+  if [ -n "$cont" ]; then
+    row Container "$cont"
+    row Package "n/a (binary lives inside the container's own filesystem)"
+  else
+    row Package "$(pkg_of "$(orig_path "$exe")" || echo 'not from a package')"
+  fi
 
   # interpreted programs (perl, python, php, bash...) — find the script being run
-  if [ -r "/proc/$p/cmdline" ]; then
+  # (skipped for containers: their paths point into the container, not the host)
+  if [ -z "$cont" ] && [ -r "/proc/$p/cmdline" ]; then
     mapfile -d '' args < "/proc/$p/cmdline" 2>/dev/null
     for a in "${args[@]:1}"; do
       [[ $a == -* ]] && continue
