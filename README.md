@@ -63,23 +63,15 @@ $ procpeek 258
 
 ## Real-world example: a CWP "malicious process" alert
 
-CWP's security audit flagged `cbpolicyd`, the Postfix mail policy daemon, as a "Suspicious process running from RAM/memfd". procpeek showed this (trimmed):
+CWP's security audit flagged `cbpolicyd`, the Postfix mail policy daemon, as a "Suspicious process running from RAM/memfd".
 
-```text
-$ procpeek cbpolicyd
-── PID 827 · cbpolicyd ──
-  User      cbpolicyd
-  Started   Wed Sep 30 23:05:21 2026  (running 16-23:46:56)
-  Command   /usr/bin/perl /usr/sbin/cbpolicyd -f /etc/cbpolicyd/cluebringer.conf
-  Binary    /usr/bin/perl;6abda560 (deleted)
-  Script    /usr/sbin/cbpolicyd (cluebringer-v2.1.x-201310261831.noarch)
-  Service   cbpolicyd.service
-  Parents   1:systemd
-  Network   1 socket(s)
-            tcp  LISTEN    *:10031 → *:*
-```
+![procpeek investigating cbpolicyd: red verdict, then yellow after the fix, then green after a restart](docs/cbpolicyd-before-after.png)
 
-The script comes from a package, systemd started it, and it listens on its usual port. The `;6abda560` on the Perl path is the temporary name `rpm` gives a file while updating it. Perl was updated after the daemon started, and the daemon is still running the old copy from memory. That makes it a false positive, and `systemctl restart cbpolicyd` loads the new Perl.
+The script came from a package, systemd started it, and it listened on its usual port. The odd part was the binary, `/usr/bin/perl;6abda560 (deleted)`. That `;6abda560` is the temporary name `rpm` gives a file while updating it.
+
+`rpm -q --last` confirmed it: the daemon started on Sep 30 at 23:05, and Perl was updated three hours later. The daemon had been running the old Perl from memory ever since. That made it a false positive, and one `systemctl restart cbpolicyd` turned the verdict green.
+
+The screenshot also shows a bug this case exposed. The first version of procpeek didn't recognize rpm's temporary name and wrongly flagged the process red. It now resolves the real package and suggests the restart.
 
 ## How the verdicts work
 
