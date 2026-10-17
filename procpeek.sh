@@ -30,6 +30,14 @@ pkg_of() {   # which package owns a file (rpm on AlmaLinux/CentOS, dpkg on Debia
   return 1
 }
 
+orig_path() {  # "/usr/bin/perl;6abda560 (deleted)" -> "/usr/bin/perl"
+  local f=${1% (deleted)} re=';[0-9a-f]{8}$'
+  # rpm writes updates as "file;<8 hex>" then renames them over the original; on some kernels
+  # a process still running the old copy then shows that temp name
+  [[ $f =~ $re ]] && f=${f%;*}
+  echo "$f"
+}
+
 judge() {    # $1 = exe link. Prints "LEVEL<TAB>reason" for anything odd, returns 1 if normal
   local exe=$1 base pkg
   case "$exe" in
@@ -37,7 +45,7 @@ judge() {    # $1 = exe link. Prints "LEVEL<TAB>reason" for anything odd, return
     /memfd:*) printf 'RED\tbinary exists only in RAM (memfd), never on disk\n' ;;
     /tmp/*|/var/tmp/*|/dev/shm/*) printf 'RED\truns from a world-writable temp folder\n' ;;
     *" (deleted)")
-      base=${exe% (deleted)}
+      base=$(orig_path "$exe")
       if pkg=$(pkg_of "$base"); then
         printf 'YEL\tbinary was replaced by an update (%s), process not restarted yet\n' "$pkg"
       else
@@ -78,7 +86,7 @@ ports() {
       127.*|\[::1\]*|::1*|*%lo:*) scope=local;  col=$D ;;
       *)                          scope=PUBLIC; col=$Y ;;
     esac
-    pkg=$( [ -n "$pid" ] && pkg_of "$(exe_of "$pid" | sed 's/ (deleted)$//')" || echo "-")
+    pkg=$( [ -n "$pid" ] && pkg_of "$(orig_path "$(exe_of "$pid")")" || echo "-")
     printf "%-5s %-28s ${col}%-7s${N} %-7s %-14s ${D}%s${N}\n" \
       "$proto" "$local" "$scope" "${pid:--}" "${name:--}" "$pkg"
   done
@@ -101,7 +109,7 @@ profile() {
   row Memory  "$(awk '/^VmRSS:/{printf "%.1f MB", $2/1024}' "$s")"
   row Command "${cmd:-[kernel thread]}"
   row Binary  "${exe:-none}"
-  row Package "$(pkg_of "${exe% (deleted)}" || echo 'not from a package')"
+  row Package "$(pkg_of "$(orig_path "$exe")" || echo 'not from a package')"
 
   # interpreted programs (perl, python, php, bash...) — find the script being run
   if [ -r "/proc/$p/cmdline" ]; then

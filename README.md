@@ -61,6 +61,26 @@ $ procpeek 258
   ⚠ binary exists only in RAM (memfd), never on disk
 ```
 
+## Real-world example: a CWP "malicious process" alert
+
+CWP's security audit flagged `cbpolicyd`, the Postfix mail policy daemon, as a "Suspicious process running from RAM/memfd". procpeek showed this (trimmed):
+
+```text
+$ procpeek cbpolicyd
+── PID 827 · cbpolicyd ──
+  User      cbpolicyd
+  Started   Wed Sep 30 23:05:21 2026  (running 16-23:46:56)
+  Command   /usr/bin/perl /usr/sbin/cbpolicyd -f /etc/cbpolicyd/cluebringer.conf
+  Binary    /usr/bin/perl;6abda560 (deleted)
+  Script    /usr/sbin/cbpolicyd (cluebringer-v2.1.x-201310261831.noarch)
+  Service   cbpolicyd.service
+  Parents   1:systemd
+  Network   1 socket(s)
+            tcp  LISTEN    *:10031 → *:*
+```
+
+The script comes from a package, systemd started it, and it listens on its usual port. The `;6abda560` on the Perl path is the temporary name `rpm` gives a file while updating it. Perl was updated after the daemon started, and the daemon is still running the old copy from memory. That makes it a false positive, and `systemctl restart cbpolicyd` loads the new Perl.
+
 ## How the verdicts work
 
 | Verdict | What it means | Usual cause |
@@ -68,7 +88,7 @@ $ procpeek 258
 | ⚠ binary exists only in RAM (memfd) | The program was loaded into an anonymous memory file and never touched the disk | Fileless malware loaders use this trick. Some legitimate software does too (sandboxes, monitoring agents) |
 | ⚠ runs from a world-writable temp folder | The binary lives in `/tmp`, `/var/tmp` or `/dev/shm` | A classic place for droppers and miners |
 | ⚠ binary was deleted and is not owned by any package | The file was removed after the process started, and no package claims that path | Malware that deletes itself, or a hand-installed tool that was removed |
-| ● binary was replaced by an update | A package updated the file on disk, but the old copy is still running | Normal after `yum`/`dnf`/`apt` upgrades. Restart the service (procpeek prints the command) |
+| ● binary was replaced by an update | A package updated the file on disk, but the old copy is still running | Normal after `yum`/`dnf`/`apt` upgrades. On RPM systems the path may end in `;` plus 8 hex digits, which is rpm's temporary file name. Restart the service (procpeek prints the command) |
 
 A red verdict is a reason to look closer, not proof of compromise. The `Package`, `Script`, `Parents` and `Network` lines in the profile usually tell you which it is.
 
