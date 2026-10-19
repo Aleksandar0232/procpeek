@@ -51,6 +51,10 @@ judge() {    # $1 = exe link. Prints "LEVEL<TAB>reason" for anything odd, return
   local exe=$1 base pkg
   case "$exe" in
     "")  return 1 ;;                                    # kernel thread, no binary
+    /memfd:runc_cloned:*)
+      # runc (Docker/containerd) copies itself into memfd on every container start, a hardening
+      # measure against CVE-2019-5736. The process lives a few hundred ms. Normal on a Docker host.
+      return 1 ;;
     /memfd:*) printf 'RED\tbinary exists only in RAM (memfd), never on disk\n' ;;
     /tmp/*|/var/tmp/*|/dev/shm/*) printf 'RED\truns from a world-writable temp folder\n' ;;
     *" (deleted)")

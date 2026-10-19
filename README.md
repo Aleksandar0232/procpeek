@@ -77,7 +77,7 @@ The screenshot also shows a bug this case exposed. The first version of procpeek
 
 | Verdict | What it means | Usual cause |
 |---|---|---|
-| ⚠ binary exists only in RAM (memfd) | The program was loaded into an anonymous memory file and never touched the disk | Fileless malware loaders use this trick. Some legitimate software does too (sandboxes, monitoring agents) |
+| ⚠ binary exists only in RAM (memfd) | The program was loaded into an anonymous memory file and never touched the disk | Fileless malware loaders use this trick. Some legitimate software does too (sandboxes, monitoring agents). One known case is skipped: `runc`, the Docker/containerd runtime, clones itself into memfd on every container start (`/memfd:runc_cloned:/proc/self/exe`) as a hardening measure against CVE-2019-5736, so a Docker host shows it constantly |
 | ⚠ runs from a world-writable temp folder | The binary lives in `/tmp`, `/var/tmp` or `/dev/shm` | A classic place for droppers and miners |
 | ⚠ binary was deleted and is not owned by any package | The file was removed after the process started, and no package claims that path | Malware that deletes itself, or a hand-installed tool that was removed |
 | ● binary was replaced by an update | A package updated the file on disk, but the old copy is still running | Normal after `yum`/`dnf`/`apt` upgrades. On RPM systems the path may end in `;` plus 8 hex digits, which is rpm's temporary file name. Restart the service (procpeek prints the command) |
